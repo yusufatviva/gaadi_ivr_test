@@ -22,8 +22,15 @@ class Gaadi(ivrlib.IvrLib):
         self.recording_path = self.path_sound + 'recordings/'
 
 class AgentBusy(Exception):pass
+
 class TotalDisconnect(Exception):pass
+
 def insert_caller_details(connObj):
+    conn=pymysql.connect(host='localhost',port=3306,user='root',password='root',database='gaadi',
+                         cursorclass=pymysql.cursors.DictCursor,autocommit=True)
+    ivr_log.debug(conn)
+    mysqlcursor=conn.cursor()
+    cursor.execute("INSERT INTO missed_calls (caller) VALUES(%s)",(connObj.caller_id))
 
 
 def process(session):
@@ -32,14 +39,12 @@ def process(session):
     cmd = '%s/%s.wav' % (record_url, ivr_obj.uuid)
     ivr_obj.esl_con.execute("record_session", cmd)
     try:
-        connObj.cp_list=get_cp_nos()
+        connObj.cp_list=get_cp_list()
         if connObj.cp_list:
             call_bridge(connObj)
         else:
             ivr_log.debug("No call patch numbers found mapped to the did number: %s"%(connObj.did_number))
             raise TotalDisconnect
-        # get_agents(connObj)
-        # dial_agent(connObj)
        # except AgentBusy:
        #  playback agents busy wav file
        #  connObj.hangup_cause="AGENTS_BUSY"
@@ -47,34 +52,26 @@ def process(session):
     except AgentBusy:
 
     except TotalDisconnect:
+        ivr_log.debug("TotalDisconnect raised")
+        insert_caller_details(connObj)
+        exit()
 
     finally:
-
         connObj.hangup("NORMAL_CLEARING")
         exit()
 # def get_circle_operator(connObj):
 
-def get_cp_nos():
-    conn=pymysql.connect(host='localhost',port=3306,user='root',password='root',database='gaadi',cursorclass=pymysql.cursors.DictCursor)
+def get_cp_list():
+    conn=pymysql.connect(host='localhost',port=3306,user='root',password='root',database='gaadi',
+                         cursorclass=pymysql.cursors.DictCursor)
     ivr_log.debug(conn)
     mysqlcursor=conn.cursor()
-    cursor.execute("SELECT vc.seq_no,vc.cp_no,vc.sms_flag,vc.isactive FROM vmn_cp vc INNER JOIN did_vmn dv ON vc.vmn_no=dv.vmn_no WHERE dv.did_no=%s ORDER BY vc.seq_no",(connObj.did_number))
+    cursor.execute("""SELECT vc.seq_no,vc.cp_no,vc.sms_flag,vc.isactive
+                    FROM vmn_cp vc INNER JOIN did_vmn dv ON vc.vmn_no=dv.vmn_no
+                    WHERE dv.did_no=%s ORDER BY vc.seq_no""",(connObj.did_number))
     result=mysqlcursor.fetchall()
     ivr_log.debug("Call patch numbers from db: %s"%(result))
     return result
-    # """
-    # print a
-    # for b in a:
-    #    print b['seq_no'],b['sms_flag']
-    # Print results
-    # a--->[{u'seq_no': 1, u'cp_no': '9022'}, {u'seq_no': 2, u'cp_no': '9323'}, {u'seq_no': 3, u'cp_no': '9820'}, {u'seq_no': 4, u'cp_no': '9819'}]
-    # b--->~^
-    # 1 9022
-    # 2 9323
-    # 3 9820
-    # 4 9819"""
-    #get vmn from did (MySQL)
-    #get agents m1,m2,m3 in sequence from vmn (MySQL)
 
 def call_bridge(connObj):
     connObj.hangup_stage = 'CALL_BRIDGE_ATTEMPT'
@@ -134,7 +131,7 @@ def dial_agent(connObj):
 
 def voice_recording_module(connObj):
     ivr_log.debug(":::Entered in voice_recording_module:::")
-    #connObj.recorded_file_path = recording_sound + connObj.uuid + "_" + connObj.caller_id + "_record_.wav"
+    connObj.recorded_file_path = recording_sound + connObj.uuid + "_" + connObj.caller_id + "_record_.wav"
     connObj.hangup_stage = 'CALL_RECORDING_MODULE'
     try:
         if connObj.esl_con.connected():
@@ -144,23 +141,22 @@ def voice_recording_module(connObj):
             connObj.record(connObj.recorded_file_path, 30)
     except Exception as e:
         ivr_log.debug("Exception raised e: %s" % e)
-    #finally:
-        #raise TotalDisconnect
+    finally:
+        raise TotalDisconnect
 
 def sms_module(connObj):
     msg = 'You have a missed call from %s'connObj.caller_id
-    for cp_no in connObj.cp_nos:
-        sms_dictionary = {
-                'username': 'SFMarathi_IVR',
-                'password': '279556',
-                "mobileno": connObj.cp_no,
-                "message": msg,
-                "cdmaheader": "SFHELP",
-                "senderid" : "SFHELP",
-                'coding':2,
-                "is_international": False
-        }
-        # if connObj.kkb_content_heard:
-        ivr_log.debug(sms_dictionary)
-        sms_response = connObj.send_sms(sms_dictionary )
-        ivr_log.debug(sms_response)
+    for cp in connObj.cp_list:
+        if cp['sms_flag']==1:
+            sms_dictionary = {
+                    'username': '',
+                    'password': '',
+                    "mobileno": cp['cp_no'],
+                    "message": msg,
+                    "cdmaheader": "",
+                    "senderid" : "",
+                    "is_international": False
+            }
+            ivr_log.debug(sms_dictionary)
+            sms_response = connObj.send_sms(sms_dictionary )
+            ivr_log.debug(sms_response)
