@@ -147,8 +147,6 @@ def voice_recording_module(connObj):
     #finally:
         #raise TotalDisconnect
 
-
-
 def sms_module(connObj):
     msg = 'You have a missed call from %s'connObj.caller_id
     for cp_no in connObj.cp_nos:
