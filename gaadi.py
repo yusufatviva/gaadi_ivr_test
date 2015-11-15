@@ -48,22 +48,22 @@ def get_cp_list():
 
 def process(session):
     connObj = Gaadi(session, ivr_log)
+    connObj.playback(connObj.path_sound + 'welcome.wav')
     record_url = '/mnt/reliance_apps/reliance_cc_recordings'
     cmd = '%s/%s.wav' % (record_url, connObj.uuid)
-    # connObj.esl_con.execute("record_session", cmd)
+    connObj.esl_con.execute("record_session", cmd)
     try:
-        connObj.playback(connObj.path_sound + 'welcome.wav')
         connObj.cp_list=get_cp_list()
         if connObj.cp_list:
             call_bridge(connObj)
         else:
             ivr_log.debug("No call patch numbers found mapped to the did(vmn) number: %s"%(connObj.did_number))
             raise TotalDisconnect
-       # except AgentBusy:
-       #  playback agents busy wav file
-       #  connObj.hangup_cause="AGENTS_BUSY"
 
     except AgentBusy:
+        connObj.hangup_stage = 'CALL_BRIDGE_AGENT_BUSY'
+        ivr_log.debug("AgentBusy raised")
+        insert_caller_details(connObj)
 
     except TotalDisconnect:
         ivr_log.debug("TotalDisconnect raised")
@@ -73,7 +73,6 @@ def process(session):
     finally:
         connObj.hangup("NORMAL_CLEARING")
         exit()
-# def get_circle_operator(connObj):
 
 def call_bridge(connObj):
     connObj.hangup_stage = 'CALL_BRIDGE_ATTEMPT'
@@ -87,10 +86,9 @@ def call_bridge(connObj):
         connObj.playback('/var/lib/viva/sounds/reliance_cc/RIL_TRANSFERCALL.wav')
         time.sleep(2)
         if bridge_start_time - time.time() > 180:
-            connObj.hangup_stage = 'CALL_BRIDGE_AGENT_BUSY'
             ans_flag = False
-            ivr_log.debug("All agents busy...Recording message")
-            voice_recording_module(connObj)
+            raise AgentBusy
+            # voice_recording_module(connObj)
 
     exit(1)
 
