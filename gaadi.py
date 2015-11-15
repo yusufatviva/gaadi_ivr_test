@@ -16,6 +16,7 @@ class Gaadi(ivrlib.IvrLib):
     def __init__(self, session, ivr_log):
         ivrlib.IvrLib.__init__(self, session, ivr_log)
         self.call_start_time = int(time.time()) #Epoch
+        self.call_forward_start_time=int(time.time())
         self.caller_id = self.getVar("caller_id_number")
         self.did_number = self.getVar("destination_number")
         self.path_sound = "/var/lib/viva/sounds/ril_petro/"
@@ -32,18 +33,31 @@ def insert_caller_details(connObj):
     mysqlcursor=conn.cursor()
     cursor.execute("INSERT INTO missed_calls (caller) VALUES(%s)",(connObj.caller_id))
 
+def get_cp_list():
+    conn=pymysql.connect(host='localhost',port=3306,user='root',password='root',database='gaadi',
+                         cursorclass=pymysql.cursors.DictCursor)
+    ivr_log.debug(conn)
+    mysqlcursor=conn.cursor()
+    cursor.execute("""SELECT vc.seq_no,vc.cp_no,vc.sms_flag,vc.isactive
+                    FROM vmn_cp vc INNER JOIN did_vmn dv ON vc.vmn_no=dv.vmn_no
+                    WHERE dv.did_no=%s ORDER BY vc.seq_no""",(connObj.did_number))
+    result=mysqlcursor.fetchall()
+    ivr_log.debug("Call patch numbers from db: %s"%(result))
+    return result
+
 
 def process(session):
     connObj = Gaadi(session, ivr_log)
     record_url = '/mnt/reliance_apps/reliance_cc_recordings'
-    cmd = '%s/%s.wav' % (record_url, ivr_obj.uuid)
-    ivr_obj.esl_con.execute("record_session", cmd)
+    cmd = '%s/%s.wav' % (record_url, connObj.uuid)
+    # connObj.esl_con.execute("record_session", cmd)
     try:
+        connObj.playback(connObj.path_sound + 'welcome.wav')
         connObj.cp_list=get_cp_list()
         if connObj.cp_list:
             call_bridge(connObj)
         else:
-            ivr_log.debug("No call patch numbers found mapped to the did number: %s"%(connObj.did_number))
+            ivr_log.debug("No call patch numbers found mapped to the did(vmn) number: %s"%(connObj.did_number))
             raise TotalDisconnect
        # except AgentBusy:
        #  playback agents busy wav file
@@ -60,18 +74,6 @@ def process(session):
         connObj.hangup("NORMAL_CLEARING")
         exit()
 # def get_circle_operator(connObj):
-
-def get_cp_list():
-    conn=pymysql.connect(host='localhost',port=3306,user='root',password='root',database='gaadi',
-                         cursorclass=pymysql.cursors.DictCursor)
-    ivr_log.debug(conn)
-    mysqlcursor=conn.cursor()
-    cursor.execute("""SELECT vc.seq_no,vc.cp_no,vc.sms_flag,vc.isactive
-                    FROM vmn_cp vc INNER JOIN did_vmn dv ON vc.vmn_no=dv.vmn_no
-                    WHERE dv.did_no=%s ORDER BY vc.seq_no""",(connObj.did_number))
-    result=mysqlcursor.fetchall()
-    ivr_log.debug("Call patch numbers from db: %s"%(result))
-    return result
 
 def call_bridge(connObj):
     connObj.hangup_stage = 'CALL_BRIDGE_ATTEMPT'
@@ -95,27 +97,27 @@ def call_bridge(connObj):
 
 def dial_agent(connObj):
     ans_flag = True
-    ivr_log.debug(connObj.uuid + "-  Call Bridging: " + connObj.call_center_number)
-    mongodb = mongo()
-    ivr_log.debug(mongodb)
-    output = mongodb.user_master.find({"status":"active", "role":"agent"}).sort("update_time", 1)
-    output = get_cp_nos()
-    ivr_log.debug(output)
+    # ivr_log.debug(connObj.uuid + "-  Call Bridging: " + connObj.call_center_number)
+    # mongodb = mongo()
+    # ivr_log.debug(mongodb)
+    #output = mongodb.user_master.find({"status":"active", "role":"agent"}).sort("update_time", 1)
+    # ivr_log.debug(output)
     cmd_str = "{originate_timeout=40,ignore_early_media=true,origination_caller_id_number=2242830995,reliance_call_leg=agent}"
     ivr_log.debug(cmd_str)
-    for data in output:
+    for cp_num in connObj.cp_list:
         if connObj.hangup_cause in ['NORMAL_CLEARING', '']:
             return False
-        ivr_log.debug(data)
+        ivr_log.debug(cp_num)
         # agent_sip_user =  str(data["sip_username"])
         # print agent_sip_user
-        agent_id = str(data["_id"])
-        cmd_str = "{dialed_user="+str(agent_sip_user)+",originate_timeout=40,ignore_early_media=true,origination_caller_id_number=2242830995,reliance_call_leg=agent}"
+        # agent_id = str(data["_id"])
+        cmd_str = """{dialed_user="+str(agent_sip_user)+",originate_timeout=40,ignore_early_media=true,
+                    origination_caller_id_number=2242830995,reliance_call_leg=agent}"""
         #dynamic_cmd = '%suser/%s' % (cmd_str, agent_sip_user)
         dynamic_cmd = '%ssofia/internal/%s%s' % (cmd_str, agent_sip_user, '%10.0.0.233')
         #update_id = mongodb.user_master.update({"_id":ObjectId(agent_id)},{"$set": {'update_time':datetime.datetime.now()}})
         #ivr_log.debug(update_id)
-        #bridge_start(connObj, agent_sip_user)
+        bridge_start(connObj, agent_sip_user)
         connObj.bridge(dynamic_cmd)
 
         ivr_log.debug('last_bridge_hangup_cause is %s' % connObj.getVar("last_bridge_hangup_cause"))
@@ -160,3 +162,11 @@ def sms_module(connObj):
             ivr_log.debug(sms_dictionary)
             sms_response = connObj.send_sms(sms_dictionary )
             ivr_log.debug(sms_response)
+
+
+#connObj.call_start_time
+#connObj.call_end_time
+#connObj.call_forward_start_time
+#connObj.call_forward_end_time
+#connObj.call_patch_start_time
+#connObj.call_patch_end_time
