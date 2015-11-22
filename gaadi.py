@@ -128,7 +128,6 @@ def dial_agent(connObj):
 
 
 
-
 def voice_recording_module(connObj):
     ivr_log.debug(":::Entered in voice_recording_module:::")
     connObj.recorded_file_path = recording_sound + connObj.uuid + "_" + connObj.caller_id + "_record_.wav"
